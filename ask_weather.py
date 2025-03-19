@@ -372,40 +372,53 @@ def main():
             )
         ]
 
-    # 初始化对话
+        # 初始化对话
         messages = []
         add_message(messages, "system",
-            "Don't make assumptions about what values to plug into functions. "
-            "Ask for clarification if a user request is ambiguous.")
+            "使用中文回答问题。如果用户请求不明确，请询问更多细节。"
+            "你是一个友好的天气助手，可以提供天气信息。")
 
-        add_message(messages, "user", "今天天气怎么样？")
+        print(colored("欢迎使用天气助手！您可以询问任何地点的天气情况。", "cyan"))
+        print(colored("输入'退出'结束对话。", "cyan"))
 
-        assistant_message = process_chat_response(messages, functions=functions)
-        messages.append(assistant_message)
-        #add_message(messages, "user", "I'm in Shanghai, China.")
-        add_message(messages, "user", "我在上海，中国。")
-        assistant_message = process_chat_response(messages, functions=functions)
-        messages.append(assistant_message)
+        # 开始对话循环
+        while True:
+            user_input = input(colored("\n您: ", "green"))
+            if user_input.lower() in ['退出', 'exit', 'quit']:
+                print(colored("谢谢使用，再见！", "cyan"))
+                break
 
-        # 检查是否有函数调用
-        if assistant_message.get("function_call"):
-            print(colored(f"助手正在调用函数: {assistant_message['function_call']['name']}", "blue"))
+            # 添加用户输入到对话
+            add_message(messages, "user", user_input)
 
-            # 执行函数调用
-            function_result = execute_function_call(assistant_message["function_call"])
-
-            # 添加函数结果到对话
-            add_message(messages, "function", function_result, assistant_message["function_call"]["name"])
             # 打印当前对话内容
             print(colored("\n当前对话内容:", "yellow"))
             pretty_print_conversation(messages)
 
-            # 获取下一个助手回复
+            # 处理助手回复
             assistant_message = process_chat_response(messages, functions=functions)
             messages.append(assistant_message)
 
-        # 打印助手回复
-        print(colored(f"助手: {assistant_message.get('content', '')}", "green"))
+            # 打印当前对话内容
+            print(colored("\n当前对话内容:", "yellow"))
+            pretty_print_conversation(messages)
+
+            # 检查是否有函数调用
+            if assistant_message.get("function_call"):
+                print(colored(f"正在获取天气信息...", "yellow"))
+
+                # 执行函数调用
+                function_result = execute_function_call(assistant_message["function_call"])
+
+                # 添加函数结果到对话
+                add_message(messages, "function", function_result, assistant_message["function_call"]["name"])
+
+                # 获取下一个助手回复
+                assistant_message = process_chat_response(messages, functions=functions)
+                messages.append(assistant_message)
+
+            # 打印助手回复
+            print(colored(f"助手: {assistant_message.get('content', '')}", "cyan"))
 
     except Exception as e:
         print(f"错误: {e}")
