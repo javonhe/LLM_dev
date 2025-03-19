@@ -20,25 +20,24 @@ MAX_WAIT = 40
 def check_environment() -> None:
     """
     检查必要的环境变量是否存在
-    
     Raises:
         EnvironmentError: 当缺少必要的环境变量时
     """
     required_vars = ["OPENAI_API_KEY", "OPENAI_BASE_URL"]
     missing_vars = [var for var in required_vars if not os.getenv(var)]
-    
+
     if missing_vars:
         raise EnvironmentError(
             f"Missing required environment variables: {', '.join(missing_vars)}"
         )
 
 
-@retry(wait=wait_random_exponential(multiplier=RETRY_MULTIPLIER, max=MAX_WAIT), 
+@retry(wait=wait_random_exponential(multiplier=RETRY_MULTIPLIER, max=MAX_WAIT),
        stop=stop_after_attempt(MAX_RETRIES))
 def chat_completion_request(
-    messages: List[Dict], 
-    functions: Optional[List[Dict]] = None, 
-    function_call: Optional[Dict] = None, 
+    messages: List[Dict],
+    functions: Optional[List[Dict]] = None,
+    function_call: Optional[Dict] = None,
     model: str = GPT_MODEL
 ) -> Union[requests.Response, Exception]:
     """
@@ -75,7 +74,7 @@ def chat_completion_request(
         # 创建会话并禁用证书验证
         session = requests.Session()
         session.verify = False
-        
+
         # 使用会话发送请求
         response = session.post(
             base,
@@ -93,11 +92,11 @@ def chat_completion_request(
 def process_chat_response(messages: List[Dict], functions: Optional[List[Dict]] = None) -> Dict:
     """
     处理聊天请求并返回助手消息
-    
+
     Args:
         messages: 对话消息列表
         functions: 可选的函数列表
-    
+
     Returns:
         Dict: 助手的回复消息
     """
@@ -114,7 +113,7 @@ def process_chat_response(messages: List[Dict], functions: Optional[List[Dict]] 
         print(f"Response: {chat_response.text}")
         exit(1)
 
-# 解析返回的JSON数据，获取助手的回复消息
+    # 解析返回的JSON数据，获取助手的回复消息
     response_data = chat_response.json()
     if "choices" not in response_data:
         print(f"Error: Unexpected API response format")
@@ -124,25 +123,31 @@ def process_chat_response(messages: List[Dict], functions: Optional[List[Dict]] 
     return response_data["choices"][0]["message"]
 
 
-def add_message(messages: List[Dict], role: str, content: str) -> None:
+def add_message(messages: List[Dict], role: str, content: str, name: str = None) -> None:
     """
     向消息列表添加新消息
-    
+
     Args:
         messages: 消息列表
         role: 消息角色
         content: 消息内容
+        name: 函数名称（当role为"function"时需要）
     """
-    messages.append({
+    message = {
         "role": role,
         "content": content
-    })
+    }
+
+    if role == "function" and name is not None:
+        message["name"] = name
+
+    messages.append(message)
 
 
 def pretty_print_conversation(messages: List[Dict]) -> None:
     """
     格式化打印对话内容
-    
+
     Args:
         messages: 包含对话消息的列表
     """
@@ -152,11 +157,11 @@ def pretty_print_conversation(messages: List[Dict]) -> None:
         "assistant": "blue",
         "function": "magenta",
     }
-    
+
     for message in messages:
         role = message["role"]
         color = role_to_color.get(role, "white")
-        
+
         if role == "system":
             print(colored(f"system: {message['content']}\n", color))
         elif role == "user":
@@ -172,12 +177,12 @@ def pretty_print_conversation(messages: List[Dict]) -> None:
 def create_weather_function_schema(name: str, description: str, additional_params: Dict = None) -> Dict:
     """
     创建天气相关函数的schema
-    
+
     Args:
         name: 函数名称
         description: 函数描述
         additional_params: 额外的参数定义
-    
+
     Returns:
         Dict: 函数schema
     """
@@ -187,10 +192,10 @@ def create_weather_function_schema(name: str, description: str, additional_param
             "description": "The city and state, e.g. shenzhen, china",
         }
     }
-    
+
     if additional_params:
         base_params.update(additional_params)
-    
+
     return {
         "name": name,
         "description": description,
@@ -210,7 +215,7 @@ def get_city_code(city_pinyin, api_key):
         "address": city_pinyin,
         "city": city_pinyin  # 增加城市限定提高准确性
     }
-    
+
     try:
         response = requests.get(geo_url, params=params, verify=False)
         data = response.json()
@@ -231,7 +236,7 @@ def get_weather(adcode, api_key, forecast=False):
         "extensions": "all" if forecast else "base",
         "output": "JSON"
     }
-    
+
     try:
         response = requests.get(weather_url, params=params, verify=False)
         return response.json() if response.status_code == 200 else None
@@ -258,16 +263,16 @@ def display_forecast(data, days=2):
     if data and data["status"] == "1":
         forecasts = data["forecasts"][0]["casts"]
         print(f"【{data['forecasts'][0]['city']}未来{days}天天气预报】")
-        
+
         # 限制最大天数为实际数据长度减1（去掉当天）
         max_days = len(forecasts) - 1
         days = min(days, max_days) if days > 0 else 1
-        
+
         for day in forecasts[1:1+days]:  # 从第二天开始取指定天数
             print(f"\n日期: {day['date']}")
             print(f"白天: {day['dayweather']} {day['daytemp']}℃ {day['daywind']}风{day['daypower']}级")
             print(f"夜间: {day['nightweather']} {day['nighttemp']}℃ {day['nightwind']}风{day['nightpower']}级")
-            
+
         if days < max_days:
             print(f"\n（最多可查询{max_days}天预报）")
     else:
@@ -276,22 +281,79 @@ def display_forecast(data, days=2):
 
 def get_current_weather(city: str) -> str:
     """获取当前天气"""
+    api_key = os.getenv("AMAP_API_KEY")
+    if not api_key:
+        return "错误：未设置高德地图API密钥(AMAP_API_KEY)"
+
     adcode = get_city_code(city, api_key)
+    if not adcode:
+        return f"无法找到城市: {city}"
+
     realtime_data = get_weather(adcode, api_key)
-    display_weather(realtime_data)
+    if realtime_data and realtime_data["status"] == "1":
+        weather = realtime_data["lives"][0]
+        return f"{weather['province']}{weather['city']}当前天气: {weather['weather']}, 温度: {weather['temperature']}℃, 湿度: {weather['humidity']}%, 风力: {weather['windpower']}级, 发布时间: {weather['reporttime']}"
+    else:
+        return "获取天气信息失败"
 
 def get_forecast_weather(city: str, days: int) -> str:
     """获取未来天气预报"""
+    api_key = os.getenv("AMAP_API_KEY")
+    if not api_key:
+        return "错误：未设置高德地图API密钥(AMAP_API_KEY)"
+
     adcode = get_city_code(city, api_key)
+    if not adcode:
+        return f"无法找到城市: {city}"
+
     forecast_data = get_weather(adcode, api_key, forecast=True)
-    display_forecast(forecast_data, days)
+    if forecast_data and forecast_data["status"] == "1":
+        forecasts = forecast_data["forecasts"][0]["casts"]
+        city_name = forecast_data["forecasts"][0]["city"]
+
+        max_days = len(forecasts) - 1
+        days = min(days, max_days) if days > 0 else 1
+
+        result = f"【{city_name}未来{days}天天气预报】\n"
+        for day in forecasts[1:1+days]:
+            result += f"\n日期: {day['date']}\n"
+            result += f"白天: {day['dayweather']} {day['daytemp']}℃ {day['daywind']}风{day['daypower']}级\n"
+            result += f"夜间: {day['nightweather']} {day['nighttemp']}℃ {day['nightwind']}风{day['nightpower']}级\n"
+
+        return result
+    else:
+        return "获取预报失败"
+
+def execute_function_call(function_call):
+    """
+    执行函数调用并返回结果
+
+    Args:
+        function_call: 函数调用信息
+
+    Returns:
+        str: 函数执行结果
+    """
+    function_name = function_call.get("name")
+    function_args = json.loads(function_call.get("arguments", "{}"))
+
+    if function_name == "get_current_weather":
+        location = function_args.get("location")
+        return get_current_weather(location)
+
+    elif function_name == "get_n_day_weather_forecast":
+        location = function_args.get("location")
+        num_days = function_args.get("num_days", 2)
+        return get_forecast_weather(location, num_days)
+
+    return f"未知的函数: {function_name}"
 
 
 def main():
     """主函数"""
     try:
         check_environment()
-        
+
         # 定义可用的函数
         functions = [
             create_weather_function_schema(
@@ -309,27 +371,44 @@ def main():
                 }
             )
         ]
-    
+
     # 初始化对话
         messages = []
-        add_message(messages, "system", 
+        add_message(messages, "system",
             "Don't make assumptions about what values to plug into functions. "
             "Ask for clarification if a user request is ambiguous.")
-    
-        add_message(messages, "user", "What's the weather like today")
+
+        add_message(messages, "user", "今天天气怎么样？")
 
         assistant_message = process_chat_response(messages, functions=functions)
         messages.append(assistant_message)
-
-        add_message(messages, "user", "I'm in Shanghai, China.")
+        #add_message(messages, "user", "I'm in Shanghai, China.")
+        add_message(messages, "user", "我在上海，中国。")
         assistant_message = process_chat_response(messages, functions=functions)
         messages.append(assistant_message)
 
-        # 打印对话历史
-        pretty_print_conversation(messages)
+        # 检查是否有函数调用
+        if assistant_message.get("function_call"):
+            print(colored(f"助手正在调用函数: {assistant_message['function_call']['name']}", "blue"))
+
+            # 执行函数调用
+            function_result = execute_function_call(assistant_message["function_call"])
+
+            # 添加函数结果到对话
+            add_message(messages, "function", function_result, assistant_message["function_call"]["name"])
+            # 打印当前对话内容
+            print(colored("\n当前对话内容:", "yellow"))
+            pretty_print_conversation(messages)
+
+            # 获取下一个助手回复
+            assistant_message = process_chat_response(messages, functions=functions)
+            messages.append(assistant_message)
+
+        # 打印助手回复
+        print(colored(f"助手: {assistant_message.get('content', '')}", "green"))
 
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"错误: {e}")
         exit(1)
 
 if __name__ == "__main__":
