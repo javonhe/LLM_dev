@@ -6,6 +6,8 @@ from termcolor import colored
 import urllib3
 from typing import List, Dict, Optional, Union
 import sqlite3
+import openai
+import httpx
 
 # 禁用SSL警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -245,40 +247,6 @@ def get_weather(adcode, api_key, forecast=False):
     return None
 
 
-def display_weather(data):
-    """展示天气信息"""
-    if data and data["status"] == "1":
-        weather = data["lives"][0]
-        print(f"城市: {weather['province']}{weather['city']}")
-        print(f"天气: {weather['weather']}")
-        print(f"温度: {weather['temperature']}℃")
-        print(f"湿度: {weather['humidity']}%")
-        print(f"风速: {weather['windpower']}级")
-        print(f"发布时间: {weather['reporttime']}")
-    else:
-        print("获取天气信息失败")
-
-def display_forecast(data, days=2):
-    """展示未来天气预报"""
-    if data and data["status"] == "1":
-        forecasts = data["forecasts"][0]["casts"]
-        print(f"【{data['forecasts'][0]['city']}未来{days}天天气预报】")
-
-        # 限制最大天数为实际数据长度减1（去掉当天）
-        max_days = len(forecasts) - 1
-        days = min(days, max_days) if days > 0 else 1
-
-        for day in forecasts[1:1+days]:  # 从第二天开始取指定天数
-            print(f"\n日期: {day['date']}")
-            print(f"白天: {day['dayweather']} {day['daytemp']}℃ {day['daywind']}风{day['daypower']}级")
-            print(f"夜间: {day['nightweather']} {day['nighttemp']}℃ {day['nightwind']}风{day['nightpower']}级")
-
-        if days < max_days:
-            print(f"\n（最多可查询{max_days}天预报）")
-    else:
-        print("获取预报失败")
-
-
 def get_current_weather(city: str) -> str:
     """获取当前天气"""
     api_key = os.getenv("AMAP_API_KEY")
@@ -295,6 +263,7 @@ def get_current_weather(city: str) -> str:
         return f"{weather['province']}{weather['city']}当前天气: {weather['weather']}, 温度: {weather['temperature']}℃, 湿度: {weather['humidity']}%, 风力: {weather['windpower']}级, 发布时间: {weather['reporttime']}"
     else:
         return "获取天气信息失败"
+
 
 def get_forecast_weather(city: str, days: int) -> str:
     """获取未来天气预报"""
@@ -323,6 +292,7 @@ def get_forecast_weather(city: str, days: int) -> str:
         return result
     else:
         return "获取预报失败"
+
 
 def execute_function_call(function_call):
     """
@@ -381,6 +351,12 @@ def main():
         print(colored("欢迎使用天气助手！您可以询问任何地点的天气情况。", "cyan"))
         print(colored("输入'退出'结束对话。", "cyan"))
 
+        client = openai.OpenAI(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            base_url=os.getenv("OPENAI_BASE_URL"),
+            http_client=httpx.Client(verify=False)  # 禁用SSL验证
+        )
+
         # 开始对话循环
         while True:
             user_input = input(colored("\n您: ", "green"))
@@ -391,17 +367,26 @@ def main():
             # 添加用户输入到对话
             add_message(messages, "user", user_input)
 
-            # 打印当前对话内容
-            print(colored("\n当前对话内容:", "yellow"))
-            pretty_print_conversation(messages)
-
             # 处理助手回复
-            assistant_message = process_chat_response(messages, functions=functions)
-            messages.append(assistant_message)
+            #assistant_message = process_chat_response(messages, functions=functions)
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=messages,
+                functions=functions
+            )
+            # 从响应中提取需要的信息
+            assistant_message = {
+                "role": "assistant",
+                "content": response.choices[0].message.content
+            }
 
-            # 打印当前对话内容
-            print(colored("\n当前对话内容:", "yellow"))
-            pretty_print_conversation(messages)
+            # 如果有函数调用，添加到消息中
+            if response.choices[0].message.function_call:
+                assistant_message["function_call"] = {
+                    "name": response.choices[0].message.function_call.name,
+                    "arguments": response.choices[0].message.function_call.arguments
+                }
+            messages.append(assistant_message)
 
             # 检查是否有函数调用
             if assistant_message.get("function_call"):
@@ -414,7 +399,24 @@ def main():
                 add_message(messages, "function", function_result, assistant_message["function_call"]["name"])
 
                 # 获取下一个助手回复
-                assistant_message = process_chat_response(messages, functions=functions)
+                #assistant_message = process_chat_response(messages, functions=functions)
+                response = client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=messages,
+                    functions=functions
+                )
+                # 从响应中提取需要的信息
+                assistant_message = {
+                    "role": "assistant",
+                    "content": response.choices[0].message.content
+                }
+
+                # 如果有函数调用，添加到消息中
+                if response.choices[0].message.function_call:
+                    assistant_message["function_call"] = {
+                        "name": response.choices[0].message.function_call.name,
+                        "arguments": response.choices[0].message.function_call.arguments
+                    }
                 messages.append(assistant_message)
 
             # 打印助手回复
